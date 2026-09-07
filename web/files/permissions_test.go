@@ -120,4 +120,60 @@ func TestPermissions(t *testing.T) {
 			WithHeader("Authorization", "Bearer "+badtok).
 			Expect().Status(403)
 	})
+
+	t.Run("MoveToForbiddenDestinationDenied", func(t *testing.T) {
+		e := testutils.CreateTestClient(t, ts.URL)
+
+		createDir := func(name string) string {
+			return e.POST("/files/").
+				WithQuery("Name", name).
+				WithQuery("Type", "directory").
+				WithHeader("Authorization", "Bearer "+token).
+				Expect().Status(201).
+				JSON(httpexpect.ContentOpts{MediaType: "application/vnd.api+json"}).
+				Object().Path("$.data.id").String().NotEmpty().Raw()
+		}
+		srcDirID := createDir("move-src")
+		dstDirID := createDir("move-dst")
+
+		fileID := e.POST("/files/"+srcDirID).
+			WithQuery("Name", "movable.txt").
+			WithQuery("Type", "file").
+			WithHeader("Content-Type", "text/plain").
+			WithHeader("Authorization", "Bearer "+token).
+			WithBytes([]byte("hello")).
+			Expect().Status(201).
+			JSON(httpexpect.ContentOpts{MediaType: "application/vnd.api+json"}).
+			Object().Path("$.data.id").String().NotEmpty().Raw()
+
+		// The token can PATCH the file through its parent directory, but
+		// cannot POST into the destination directory.
+		srctok, _ := testInstance.MakeJWT(consts.AccessTokenAudience, client.ClientID, "io.cozy.files:ALL:"+srcDirID, "", time.Now())
+
+		e.PATCH("/files/"+fileID).
+			WithHeader("Content-Type", "application/json").
+			WithHeader("Authorization", "Bearer "+srctok).
+			WithBytes([]byte(`{"data":{"type":"io.cozy.files","id":"` + fileID + `","attributes":{"dir_id":"` + dstDirID + `"}}}`)).
+			Expect().Status(403)
+	})
+
+	t.Run("MoveToMissingDestinationNotFound", func(t *testing.T) {
+		e := testutils.CreateTestClient(t, ts.URL)
+
+		fileID := e.POST("/files/").
+			WithQuery("Name", "orphan-move.txt").
+			WithQuery("Type", "file").
+			WithHeader("Content-Type", "text/plain").
+			WithHeader("Authorization", "Bearer "+token).
+			WithBytes([]byte("hello")).
+			Expect().Status(201).
+			JSON(httpexpect.ContentOpts{MediaType: "application/vnd.api+json"}).
+			Object().Path("$.data.id").String().NotEmpty().Raw()
+
+		e.PATCH("/files/"+fileID).
+			WithHeader("Content-Type", "application/json").
+			WithHeader("Authorization", "Bearer "+token).
+			WithBytes([]byte(`{"data":{"type":"io.cozy.files","id":"` + fileID + `","attributes":{"dir_id":"does-not-exist"}}}`)).
+			Expect().Status(404)
+	})
 }

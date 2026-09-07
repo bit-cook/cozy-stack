@@ -6102,6 +6102,120 @@ func TestSharedDriveEffectiveAccessOnMoveDestination(t *testing.T) {
 	})
 }
 
+func TestFilesPatchRejectsSharedDriveMoves(t *testing.T) {
+	if testing.Short() {
+		t.Skip("an instance is required for this test: test skipped due to the use of --short flag")
+	}
+
+	env := setupSharedDrivesEnv(t)
+	eA, _, _ := env.createClients(t)
+
+	d1ID, d1RootID, _ := createSharedDrive(t, DriveCreationMethodFromFolder,
+		env.acme, env.acmeToken, env.tsA.URL, "Patch Move D1", "d1",
+		[]RecipientInfo{{Name: "Dave", Email: "dave@example.net", ReadOnly: false}})
+
+	insideFileID := createFile(t, eA, d1RootID, "inside.txt", env.acmeToken)
+	insideSubDirID := createDirectory(t, eA, d1RootID, "Sub", env.acmeToken)
+	outsideDirID := createRootDirectory(t, eA, "OutsideDrive", env.acmeToken)
+	outsideFileID := createFile(t, eA, outsideDirID, "outside.txt", env.acmeToken)
+	otherOutsideDirID := createRootDirectory(t, eA, "OtherOutside", env.acmeToken)
+
+	acceptSharedDrive(t, env.acme, env.dave, "Dave", env.tsA.URL, env.tsD.URL, d1ID)
+
+	movePayload := func(id, destID string) string {
+		return `{"data":{"type":"io.cozy.files","id":"` + id + `",` +
+			`"relationships":{"parent":{"data":{"type":"io.cozy.files","id":"` + destID + `"}}}}}`
+	}
+
+	t.Run("MoveFileInsideDriveDenied", func(t *testing.T) {
+		eA.PATCH("/files/"+insideFileID).
+			WithHeader("Authorization", "Bearer "+env.acmeToken).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(movePayload(insideFileID, insideSubDirID))).
+			Expect().Status(422)
+	})
+
+	t.Run("BatchMoveFileInsideDriveDenied", func(t *testing.T) {
+		// Batch PATCH aborts on the shared-drive rejection: the top-level
+		// error handler renders it as a single 422 error, not a 500.
+		batch := `{"data":[{"type":"io.cozy.files","id":"` + insideFileID + `",` +
+			`"attributes":{},` +
+			`"relationships":{"parent":{"data":{"type":"io.cozy.files","id":"` + insideSubDirID + `"}}}}]}`
+		eA.PATCH("/files/").
+			WithHeader("Authorization", "Bearer "+env.acmeToken).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(batch)).
+			Expect().Status(422).
+			JSON(httpexpect.ContentOpts{MediaType: "application/vnd.api+json"}).Object().
+			Value("errors").Array().Value(0).Object().
+			Value("status").IsEqual("422")
+	})
+
+	t.Run("MoveDriveFileToOutsideDenied", func(t *testing.T) {
+		eA.PATCH("/files/"+insideFileID).
+			WithHeader("Authorization", "Bearer "+env.acmeToken).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(movePayload(insideFileID, outsideDirID))).
+			Expect().Status(422)
+	})
+
+	t.Run("MoveOutsideFileIntoDriveDenied", func(t *testing.T) {
+		eA.PATCH("/files/"+outsideFileID).
+			WithHeader("Authorization", "Bearer "+env.acmeToken).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(movePayload(outsideFileID, d1RootID))).
+			Expect().Status(422)
+	})
+
+	t.Run("MoveOutsideDriveAllowed", func(t *testing.T) {
+		eA.PATCH("/files/"+outsideFileID).
+			WithHeader("Authorization", "Bearer "+env.acmeToken).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(movePayload(outsideFileID, otherOutsideDirID))).
+			Expect().Status(200)
+	})
+
+	t.Run("MoveIntoClassicSharingAllowed", func(t *testing.T) {
+		// Only shared drives require POST /sharings/drives/move: moving into
+		// a folder shared via a classic (non-drive) sharing stays allowed.
+		classicDirID := createRootDirectory(t, eA, "ClassicShare", env.acmeToken)
+		createClassicDirSharing(t, env.acme, classicDirID)
+		eA.PATCH("/files/"+outsideFileID).
+			WithHeader("Authorization", "Bearer "+env.acmeToken).
+			WithHeader("Content-Type", "application/json").
+			WithBytes([]byte(movePayload(outsideFileID, classicDirID))).
+			Expect().Status(200)
+	})
+}
+
+// createClassicDirSharing creates an active, owner-side classic (non-drive)
+// sharing rooted at the given directory, stamping referenced_by on it.
+func createClassicDirSharing(t *testing.T, inst *instance.Instance, rootID string) *sharing.Sharing {
+	t.Helper()
+	name, err := inst.SettingsPublicName()
+	require.NoError(t, err)
+	email, err := inst.SettingsEMail()
+	require.NoError(t, err)
+	s := &sharing.Sharing{
+		Active: true,
+		Owner:  true,
+		Members: []sharing.Member{{
+			Status:   sharing.MemberStatusOwner,
+			Name:     name,
+			Email:    email,
+			Instance: "https://" + inst.Domain,
+		}},
+		Rules: []sharing.Rule{{
+			Title:   "classic",
+			DocType: consts.Files,
+			Values:  []string{rootID},
+		}},
+	}
+	require.NoError(t, couchdb.CreateDoc(inst, s))
+	require.NoError(t, s.AddReferenceForSharing(inst, &s.Rules[0]))
+	return s
+}
+
 func TestSharedDriveEffectiveAccessOnTrashRoutes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("an instance is required for this test: test skipped due to the use of --short flag")
