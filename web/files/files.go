@@ -722,6 +722,10 @@ func applyPatch(c echo.Context, fs vfs.VFS, patch *docPatch) (err error) {
 		return err
 	}
 
+	if err = checkMoveDestination(c, fs, patch, dir, file); err != nil {
+		return err
+	}
+
 	if patch.Delete {
 		if dir != nil {
 			inst := middlewares.GetInstance(c)
@@ -775,6 +779,9 @@ func applyPatches(c echo.Context, fs vfs.VFS, patches []*docPatch) (errors []*js
 			continue
 		}
 		if err = checkPerm(c, permission.PATCH, dir, file); err != nil {
+			return
+		}
+		if err = checkMoveDestination(c, fs, patch, dir, file); err != nil {
 			return
 		}
 		var errp error
@@ -2241,6 +2248,12 @@ func WrapVfsError(err error) error {
 }
 
 func wrapVfsErrorJSONAPI(err error) *jsonapi.Error {
+	if errj, ok := err.(*jsonapi.Error); ok {
+		return errj
+	}
+	if he, ok := err.(*echo.HTTPError); ok {
+		return jsonapi.Errorf(he.Code, "%v", he.Message)
+	}
 	if errj := wrapVfsError(err); errj != nil {
 		return errj
 	}
@@ -2417,6 +2430,58 @@ func checkPerm(c echo.Context, v permission.Verb, d *vfs.DirDoc, f *vfs.FileDoc)
 		return middlewares.AllowVFS(c, v, d)
 	}
 	return middlewares.AllowVFS(c, v, f)
+}
+
+// checkMoveDestination enforces the extra authorization required when a
+// PATCH behaves like a move (changes the parent directory): the destination
+// must exist, the caller needs POST on it, and moves touching a shared drive
+// are rejected here.
+//
+// ponytail: strict rejection — shared-drive moves must go through
+// POST /sharings/drives/move; lift when the shared-aware move task
+// implements delegation.
+func checkMoveDestination(c echo.Context, fs vfs.VFS, patch *docPatch, dir *vfs.DirDoc, file *vfs.FileDoc) error {
+	if patch.DirID == nil || patch.Trash || patch.Delete {
+		return nil
+	}
+	var currentDirID string
+	if dir != nil {
+		currentDirID = dir.DirID
+	} else {
+		currentDirID = file.DirID
+	}
+	if *patch.DirID == currentDirID {
+		return nil // dir_id set to its current value: not a move
+	}
+	newParent, _, err := fs.DirOrFileByID(*patch.DirID)
+	if err != nil {
+		return err
+	}
+	if newParent == nil {
+		return jsonapi.BadRequest(errors.New("destination is not a directory"))
+	}
+	if err := middlewares.AllowVFS(c, permission.POST, newParent); err != nil {
+		return err
+	}
+	resolver := sharing.NewAccessResolver(middlewares.GetInstance(c))
+	if err := checkSharedDrive(resolver, dir, file); err != nil {
+		return err
+	}
+	return checkSharedDrive(resolver, newParent, nil)
+}
+
+// checkSharedDrive rejects the move if the doc (dir or file) belongs to a
+// shared drive.
+func checkSharedDrive(r *sharing.AccessResolver, d *vfs.DirDoc, f *vfs.FileDoc) error {
+	shared, err := r.HasDriveSharing(d, f)
+	if err != nil {
+		return err
+	}
+	if shared {
+		return jsonapi.NewError(http.StatusUnprocessableEntity,
+			"moving to or from a shared drive must use POST /sharings/drives/move")
+	}
+	return nil
 }
 
 func parseMD5Hash(md5B64 string) ([]byte, error) {

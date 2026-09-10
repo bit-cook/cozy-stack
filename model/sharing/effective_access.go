@@ -7,6 +7,7 @@ import (
 
 	"github.com/cozy/cozy-stack/model/instance"
 	"github.com/cozy/cozy-stack/model/permission"
+	"github.com/cozy/cozy-stack/model/vfs"
 	"github.com/cozy/cozy-stack/pkg/consts"
 	"github.com/cozy/cozy-stack/pkg/couchdb"
 	"github.com/cozy/cozy-stack/pkg/couchdb/mango"
@@ -84,6 +85,23 @@ func (r *AccessResolver) ResolveForMember(targetID string, member *Member) (*Eff
 	})
 }
 
+// HasDriveSharing reports whether at least one drive sharing applies to the
+// target, i.e. the target is a drive root or lives under one. The target doc
+// is passed by the caller (exactly one of dir/file must be non-nil) to avoid
+// re-fetching a doc the caller already has.
+func (r *AccessResolver) HasDriveSharing(dir *vfs.DirDoc, file *vfs.FileDoc) (bool, error) {
+	sharings, _, err := r.applicableSharingsForDoc(dir, file)
+	if err != nil {
+		return false, err
+	}
+	for _, s := range sharings {
+		if s.Drive && s.MemberFor(r.inst) != nil {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *AccessResolver) resolve(targetID string, memberOf func(*Sharing) *Member) (*EffectiveAccess, error) {
 	scopes, err := r.scopesMatching(targetID, memberOf)
 	if err != nil {
@@ -144,17 +162,23 @@ func (r *AccessResolver) scopesMatching(targetID string, memberOf func(*Sharing)
 // ancestor directory, without any membership filtering. It also returns the
 // root info of each sharing, keyed by sharing ID.
 func (r *AccessResolver) applicableSharings(targetID string) ([]*Sharing, map[string]rootInfo, error) {
-	fs := r.inst.VFS()
-
-	dir, file, err := fs.DirOrFileByID(targetID)
+	dir, file, err := r.inst.VFS().DirOrFileByID(targetID)
 	if err != nil {
 		return nil, nil, err
 	}
 	if dir == nil && file == nil {
 		return nil, nil, os.ErrNotExist
 	}
+	return r.applicableSharingsForDoc(dir, file)
+}
+
+// applicableSharingsForDoc is applicableSharings with the target doc already
+// loaded by the caller (exactly one of dir/file must be non-nil).
+func (r *AccessResolver) applicableSharingsForDoc(dir *vfs.DirDoc, file *vfs.FileDoc) ([]*Sharing, map[string]rootInfo, error) {
+	fs := r.inst.VFS()
 
 	var targetPath string
+	var err error
 	if dir != nil {
 		targetPath = dir.Fullpath
 	} else {

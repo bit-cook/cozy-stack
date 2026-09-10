@@ -1426,7 +1426,10 @@ file/directory to update, and the second one uses the path.
 
 Some specific attributes of the patch can be used:
 
-- `dir_id` attribute can be updated to move a file or directory
+- `dir_id` attribute can be updated to move a file or directory. Moving
+  requires POST permission on the destination directory, and moving a file or
+  directory from or into a shared drive is rejected: such moves must use
+  `POST /sharings/drives/move` instead
 - `move_to_trash` boolean to specify that the file needs to be moved to the
   trash
 - `permanent_delete` boolean to specify that the files needs to be deleted
@@ -1470,11 +1473,14 @@ Content-Type: application/vnd.api+json
 - 200 OK, when the file or directory metadata has been successfully updated
 - 400 Bad Request, when a the directory is asked to move to one of its
   sub-directories
-- 404 Not Found, when the file/directory wasn't existing
+- 403 Forbidden, when the permission does not allow PATCH on the target, or
+  POST on the destination directory of a move
+- 404 Not Found, when the file/directory wasn't existing, or when the
+  destination parent doesn't exist
 - 412 Precondition Failed, when the `If-Match` header is set and doesn't match
   the last revision of the file/directory
-- 422 Unprocessable Entity, when the sent data is invalid (for example, the
-  parent doesn't exist)
+- 422 Unprocessable Entity, when the sent data is invalid, or when the move
+  crosses a shared drive boundary
 
 #### Response
 
