@@ -1,9 +1,11 @@
 package lock
 
 import (
+	"errors"
 	"sync"
 	"time"
 
+	"github.com/cozy/cozy-stack/pkg/logger"
 	"github.com/cozy/cozy-stack/pkg/prefixer"
 	"github.com/redis/go-redis/v9"
 )
@@ -43,8 +45,11 @@ type ErrorRWLocker interface {
 
 type longOperationLocker interface {
 	ErrorLocker
-	Extend()
+	Extend() error
 }
+
+// errLockLost means that an operation no longer owns its distributed lock.
+var errLockLost = errors.New("lock ownership lost")
 
 type longOperation struct {
 	lock    longOperationLocker
@@ -72,7 +77,11 @@ func (l *longOperation) Lock() error {
 			if l.tick == nil {
 				return
 			}
-			l.lock.Extend()
+			if err := l.lock.Extend(); err != nil {
+				logger.WithNamespace("lock").
+					Warnf("cannot extend a long operation lease: %s", err)
+				return
+			}
 			l.mu.Unlock()
 		}
 	}()
