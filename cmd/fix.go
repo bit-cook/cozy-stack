@@ -44,7 +44,7 @@ var mimeFixerCmd = &cobra.Command{
 		if len(args) == 0 {
 			return cmd.Usage()
 		}
-		c := newClient(args[0], consts.Files)
+		c := newFilesClient(args[0], "")
 		return c.WalkByPath("/", func(name string, doc *client.DirOrFile, err error) error {
 			if err != nil {
 				return err

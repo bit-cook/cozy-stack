@@ -72,7 +72,7 @@ var execFilesCmd = &cobra.Command{
 			errPrintfln("%s", errMissingDomain)
 			return cmd.Usage()
 		}
-		c := newClient(flagDomain, consts.Files)
+		c := newFilesClient(flagDomain, "")
 		command := args[0]
 		err := execCommand(c, command, os.Stdout)
 		if errors.Is(err, errFilesExec) {
@@ -103,7 +103,7 @@ var importFilesCmd = &cobra.Command{
 			}
 		}
 
-		c := newClient(flagDomain, consts.Files)
+		c := newFilesClient(flagDomain, "")
 		return importFiles(c, flagImportFrom, flagImportTo, match)
 	},
 }
@@ -149,7 +149,7 @@ var usageFilesCmd = &cobra.Command{
 	},
 }
 
-func execCommand(c *client.Client, command string, w io.Writer) error {
+func execCommand(c *client.FilesClient, command string, w io.Writer) error {
 	args := splitArgs(command)
 	if len(args) == 0 {
 		return errFilesExec
@@ -214,7 +214,7 @@ func execCommand(c *client.Client, command string, w io.Writer) error {
 	return errFilesExec
 }
 
-func mkdirCmd(c *client.Client, name string, mkdirP bool) error {
+func mkdirCmd(c *client.FilesClient, name string, mkdirP bool) error {
 	var err error
 	if mkdirP {
 		_, err = c.Mkdirall(name)
@@ -224,7 +224,7 @@ func mkdirCmd(c *client.Client, name string, mkdirP bool) error {
 	return err
 }
 
-func lsCmd(c *client.Client, root string, w io.Writer, verbose, human, all bool) error {
+func lsCmd(c *client.FilesClient, root string, w io.Writer, verbose, human, all bool) error {
 	type filePrint struct {
 		id    string
 		typ   string
@@ -330,7 +330,7 @@ func lsCmd(c *client.Client, root string, w io.Writer, verbose, human, all bool)
 	return nil
 }
 
-func treeCmd(c *client.Client, root string, w io.Writer, verbose bool) error {
+func treeCmd(c *client.FilesClient, root string, w io.Writer, verbose bool) error {
 	root = path.Clean(root)
 
 	return c.WalkByPath(root, func(name string, doc *client.DirOrFile, err error) error {
@@ -363,7 +363,7 @@ func treeCmd(c *client.Client, root string, w io.Writer, verbose bool) error {
 	})
 }
 
-func attrsCmd(c *client.Client, name string, w io.Writer) error {
+func attrsCmd(c *client.FilesClient, name string, w io.Writer) error {
 	doc, err := c.GetDirOrFileByPath(name)
 	if err != nil {
 		return err
@@ -373,7 +373,7 @@ func attrsCmd(c *client.Client, name string, w io.Writer) error {
 	return enc.Encode(doc)
 }
 
-func catCmd(c *client.Client, name string, w io.Writer) error {
+func catCmd(c *client.FilesClient, name string, w io.Writer) error {
 	r, err := c.DownloadByPath(name)
 	if err != nil {
 		return err
@@ -385,23 +385,23 @@ func catCmd(c *client.Client, name string, w io.Writer) error {
 	return err
 }
 
-func mvCmd(c *client.Client, from, to string) error {
+func mvCmd(c *client.FilesClient, from, to string) error {
 	return c.Move(from, to)
 }
 
-func rmCmd(c *client.Client, name string, force, recur bool) error {
+func rmCmd(c *client.FilesClient, name string, force, recur bool) error {
 	if force {
 		return c.PermanentDeleteByPath(name)
 	}
 	return c.TrashByPath(name)
 }
 
-func restoreCmd(c *client.Client, name string) error {
+func restoreCmd(c *client.FilesClient, name string) error {
 	return c.RestoreByPath(name)
 }
 
 type importer struct {
-	c     *client.Client
+	c     *client.FilesClient
 	paths map[string]string
 }
 
@@ -447,7 +447,7 @@ func (i *importer) upload(localname, distname string) error {
 	return err
 }
 
-func importFiles(c *client.Client, from, to string, match *regexp.Regexp) error {
+func importFiles(c *client.FilesClient, from, to string, match *regexp.Regexp) error {
 	from = path.Clean(from)
 	to = path.Clean(to)
 
