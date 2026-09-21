@@ -12,6 +12,7 @@ import (
 	"github.com/cozy/cozy-stack/client/request"
 	build "github.com/cozy/cozy-stack/pkg/config"
 	"github.com/cozy/cozy-stack/pkg/config/config"
+	"github.com/cozy/cozy-stack/pkg/consts"
 	"github.com/cozy/cozy-stack/pkg/tlsclient"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -67,6 +68,10 @@ func newClient(domain string, scopes ...string) *client.Client {
 		os.Exit(1)
 	}
 	return client
+}
+
+func newFilesClient(domain, driveID string) *client.FilesClient {
+	return client.NewFilesClient(newClient(domain, consts.Files), driveID)
 }
 
 func newAdminClient() *client.AdminClient {

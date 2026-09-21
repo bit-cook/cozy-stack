@@ -70,11 +70,11 @@ func TestExecCommand(t *testing.T) {
 	}
 
 	buf := new(bytes.Buffer)
-	err = execCommand(testClient, "mkdir /hello-test", buf)
+	err = execCommand(client.NewFilesClient(testClient, ""), "mkdir /hello-test", buf)
 	assert.NoError(t, err)
 
 	buf = new(bytes.Buffer)
-	err = execCommand(testClient, "ls /", buf)
+	err = execCommand(client.NewFilesClient(testClient, ""), "ls /", buf)
 	assert.NoError(t, err)
 	assert.True(t, bytes.Contains(buf.Bytes(), []byte("hello-test")))
 }

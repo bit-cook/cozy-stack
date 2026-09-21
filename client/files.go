@@ -97,11 +97,38 @@ type FilePatch struct {
 // listing directory children. Tests can override this to force pagination.
 var ListChildrenPageSize = "100"
 
+// FilesClient is a specialized client for the files API. It embeds Client
+// for authentication and transport, and routes its operations either through
+// /files (default) or through the /sharings/drives/<id> endpoints of the
+// given shared drive, so the stack hosting the drive enforces member
+// authorization. All the operations routed through filesPath have a
+// drive-route equivalent (reads, creation, metadata patch, upload,
+// overwrite, trash, restore, destroy).
+type FilesClient struct {
+	*Client
+	driveID string
+}
+
+// NewFilesClient wraps a Client into a FilesClient scoped to the given
+// shared drive. An empty driveID routes the operations through /files.
+func NewFilesClient(c *Client, driveID string) *FilesClient {
+	return &FilesClient{Client: c, driveID: driveID}
+}
+
+// filesPath prefixes p with the files API root: the shared-drive endpoints
+// when the client is scoped to a drive, /files otherwise.
+func (c *FilesClient) filesPath(p string) string {
+	if c.driveID != "" {
+		return "/sharings/drives/" + url.PathEscape(c.driveID) + p
+	}
+	return "/files" + p
+}
+
 // GetFileByID returns a File given the specified ID
-func (c *Client) GetFileByID(id string) (*File, error) {
+func (c *FilesClient) GetFileByID(id string) (*File, error) {
 	res, err := c.Req(&request.Options{
 		Method: "GET",
-		Path:   "/files/" + url.PathEscape(id),
+		Path:   c.filesPath("/" + url.PathEscape(id)),
 	})
 	if err != nil {
 		return nil, err
@@ -110,10 +137,10 @@ func (c *Client) GetFileByID(id string) (*File, error) {
 }
 
 // GetFileByPath returns a File given the specified path
-func (c *Client) GetFileByPath(name string) (*File, error) {
+func (c *FilesClient) GetFileByPath(name string) (*File, error) {
 	res, err := c.Req(&request.Options{
 		Method:  "GET",
-		Path:    "/files/metadata",
+		Path:    c.filesPath("/metadata"),
 		Queries: url.Values{"Path": {name}},
 	})
 	if err != nil {
@@ -123,10 +150,10 @@ func (c *Client) GetFileByPath(name string) (*File, error) {
 }
 
 // GetDirByID returns a Dir given the specified ID
-func (c *Client) GetDirByID(id string) (*Dir, error) {
+func (c *FilesClient) GetDirByID(id string) (*Dir, error) {
 	res, err := c.Req(&request.Options{
 		Method: "GET",
-		Path:   "/files/" + url.PathEscape(id),
+		Path:   c.filesPath("/" + url.PathEscape(id)),
 	})
 	if err != nil {
 		return nil, err
@@ -135,10 +162,10 @@ func (c *Client) GetDirByID(id string) (*Dir, error) {
 }
 
 // GetDirByPath returns a Dir given the specified path
-func (c *Client) GetDirByPath(name string) (*Dir, error) {
+func (c *FilesClient) GetDirByPath(name string) (*Dir, error) {
 	res, err := c.Req(&request.Options{
 		Method:  "GET",
-		Path:    "/files/metadata",
+		Path:    c.filesPath("/metadata"),
 		Queries: url.Values{"Path": {name}},
 	})
 	if err != nil {
@@ -148,10 +175,10 @@ func (c *Client) GetDirByPath(name string) (*Dir, error) {
 }
 
 // GetDirOrFileByPath returns a DirOrFile given the specified path
-func (c *Client) GetDirOrFileByPath(name string) (*DirOrFile, error) {
+func (c *FilesClient) GetDirOrFileByPath(name string) (*DirOrFile, error) {
 	res, err := c.Req(&request.Options{
 		Method:  "GET",
-		Path:    "/files/metadata",
+		Path:    c.filesPath("/metadata"),
 		Queries: url.Values{"Path": {name}},
 	})
 	if err != nil {
@@ -162,20 +189,20 @@ func (c *Client) GetDirOrFileByPath(name string) (*DirOrFile, error) {
 
 // Mkdir creates a directory with the specified path. If the directory's parent
 // does not exist, an error is returned.
-func (c *Client) Mkdir(name string) (*Dir, error) {
+func (c *FilesClient) Mkdir(name string) (*Dir, error) {
 	return c.mkdir(name, "")
 }
 
 // Mkdirall creates a directory with the specified path. If the directory's
 // parent does not exist, all intermediary parents are created.
-func (c *Client) Mkdirall(name string) (*Dir, error) {
+func (c *FilesClient) Mkdirall(name string) (*Dir, error) {
 	return c.mkdir(name, "true")
 }
 
-func (c *Client) mkdir(name string, recur string) (*Dir, error) {
+func (c *FilesClient) mkdir(name string, recur string) (*Dir, error) {
 	res, err := c.Req(&request.Options{
 		Method: "POST",
-		Path:   "/files/",
+		Path:   c.filesPath("/"),
 		Queries: url.Values{
 			"Path":      {name},
 			"Type":      {"directory"},
@@ -190,10 +217,10 @@ func (c *Client) mkdir(name string, recur string) (*Dir, error) {
 
 // DownloadByID is used to download a file's content given its ID. It returns
 // a io.ReadCloser that you can read from.
-func (c *Client) DownloadByID(id string) (io.ReadCloser, error) {
+func (c *FilesClient) DownloadByID(id string) (io.ReadCloser, error) {
 	res, err := c.Req(&request.Options{
 		Method: "GET",
-		Path:   "/files/download/" + url.PathEscape(id),
+		Path:   c.filesPath("/download/" + url.PathEscape(id)),
 	})
 	if err != nil {
 		return nil, err
@@ -203,10 +230,10 @@ func (c *Client) DownloadByID(id string) (io.ReadCloser, error) {
 
 // DownloadByPath is used to download a file's content given its path. It
 // returns a io.ReadCloser that you can read from.
-func (c *Client) DownloadByPath(name string) (io.ReadCloser, error) {
+func (c *FilesClient) DownloadByPath(name string) (io.ReadCloser, error) {
 	res, err := c.Req(&request.Options{
 		Method:  "GET",
-		Path:    "/files/download",
+		Path:    c.filesPath("/download"),
 		Queries: url.Values{"Path": {name}},
 	})
 	if err != nil {
@@ -217,7 +244,7 @@ func (c *Client) DownloadByPath(name string) (io.ReadCloser, error) {
 
 // Upload is used to upload a new file from an using a Upload instance. If the
 // ContentMD5 field is not nil, the file integrity is checked.
-func (c *Client) Upload(u *Upload) (*File, error) {
+func (c *FilesClient) Upload(u *Upload) (*File, error) {
 	headers := make(request.Headers)
 	if u.ContentMD5 != nil {
 		headers["Content-MD5"] = base64.StdEncoding.EncodeToString(u.ContentMD5)
@@ -237,13 +264,13 @@ func (c *Client) Upload(u *Upload) (*File, error) {
 
 	if u.Overwrite {
 		opts.Method = "PUT"
-		opts.Path = "/files/" + url.PathEscape(u.FileID)
+		opts.Path = c.filesPath("/" + url.PathEscape(u.FileID))
 		if u.FileRev != "" {
 			headers["If-Match"] = u.FileRev
 		}
 	} else {
 		opts.Method = "POST"
-		opts.Path = "/files/" + url.PathEscape(u.DirID)
+		opts.Path = c.filesPath("/" + url.PathEscape(u.DirID))
 		opts.Queries = url.Values{
 			"Type": {"file"},
 			"Name": {u.Name},
@@ -258,7 +285,7 @@ func (c *Client) Upload(u *Upload) (*File, error) {
 
 // UpdateAttrsByID is used to update the attributes of a file or directory
 // of the specified ID
-func (c *Client) UpdateAttrsByID(id string, patch *FilePatch) (*DirOrFile, error) {
+func (c *FilesClient) UpdateAttrsByID(id string, patch *FilePatch) (*DirOrFile, error) {
 	body, err := writeJSONAPI(patch)
 	if err != nil {
 		return nil, err
@@ -269,7 +296,7 @@ func (c *Client) UpdateAttrsByID(id string, patch *FilePatch) (*DirOrFile, error
 	}
 	res, err := c.Req(&request.Options{
 		Method:  "PATCH",
-		Path:    "/files/" + id,
+		Path:    c.filesPath("/" + id),
 		Body:    body,
 		Headers: headers,
 	})
@@ -281,7 +308,7 @@ func (c *Client) UpdateAttrsByID(id string, patch *FilePatch) (*DirOrFile, error
 
 // UpdateAttrsByPath is used to update the attributes of a file or directory
 // of the specified path
-func (c *Client) UpdateAttrsByPath(name string, patch *FilePatch) (*DirOrFile, error) {
+func (c *FilesClient) UpdateAttrsByPath(name string, patch *FilePatch) (*DirOrFile, error) {
 	body, err := writeJSONAPI(patch)
 	if err != nil {
 		return nil, err
@@ -292,7 +319,7 @@ func (c *Client) UpdateAttrsByPath(name string, patch *FilePatch) (*DirOrFile, e
 	}
 	res, err := c.Req(&request.Options{
 		Method:  "PATCH",
-		Path:    "/files/metadata",
+		Path:    c.filesPath("/metadata"),
 		Headers: headers,
 		Body:    body,
 		Queries: url.Values{"Path": {name}},
@@ -305,7 +332,7 @@ func (c *Client) UpdateAttrsByPath(name string, patch *FilePatch) (*DirOrFile, e
 
 // Move is used to move a file or directory from a given path to the other
 // given path
-func (c *Client) Move(from, to string) error {
+func (c *FilesClient) Move(from, to string) error {
 	doc, err := c.GetDirByPath(path.Dir(to))
 	if err != nil {
 		return err
@@ -322,10 +349,10 @@ func (c *Client) Move(from, to string) error {
 
 // TrashByID is used to move a file or directory specified by its ID to the
 // trash
-func (c *Client) TrashByID(id string) error {
+func (c *FilesClient) TrashByID(id string) error {
 	_, err := c.Req(&request.Options{
 		Method:     "DELETE",
-		Path:       "/files/" + url.PathEscape(id),
+		Path:       c.filesPath("/" + url.PathEscape(id)),
 		NoResponse: true,
 	})
 	return err
@@ -333,7 +360,7 @@ func (c *Client) TrashByID(id string) error {
 
 // TrashByPath is used to move a file or directory specified by its path to the
 // trash
-func (c *Client) TrashByPath(name string) error {
+func (c *FilesClient) TrashByPath(name string) error {
 	doc, err := c.GetDirOrFileByPath(name)
 	if err != nil {
 		return err
@@ -343,10 +370,10 @@ func (c *Client) TrashByPath(name string) error {
 
 // RestoreByID is used to restore a file or directory from the trash given its
 // ID
-func (c *Client) RestoreByID(id string) error {
+func (c *FilesClient) RestoreByID(id string) error {
 	_, err := c.Req(&request.Options{
 		Method:     "POST",
-		Path:       "/files/trash/" + url.PathEscape(id),
+		Path:       c.filesPath("/trash/" + url.PathEscape(id)),
 		NoResponse: true,
 	})
 	return err
@@ -354,7 +381,7 @@ func (c *Client) RestoreByID(id string) error {
 
 // RestoreByPath is used to restore a file or directory from the trash given its
 // path
-func (c *Client) RestoreByPath(name string) error {
+func (c *FilesClient) RestoreByPath(name string) error {
 	doc, err := c.GetDirOrFileByPath(name)
 	if err != nil {
 		return err
@@ -364,10 +391,10 @@ func (c *Client) RestoreByPath(name string) error {
 
 // PermanentDeleteByID is used to delete a file or directory specified by its
 // ID, not just putting it in the trash
-func (c *Client) PermanentDeleteByID(id string) error {
+func (c *FilesClient) PermanentDeleteByID(id string) error {
 	_, err := c.Req(&request.Options{
 		Method:     "PATCH",
-		Path:       "/files/" + url.PathEscape(id),
+		Path:       c.filesPath("/" + url.PathEscape(id)),
 		Body:       strings.NewReader(`{"data": {"attributes": {"permanent_delete": true}}}`),
 		NoResponse: true,
 	})
@@ -376,7 +403,7 @@ func (c *Client) PermanentDeleteByID(id string) error {
 
 // PermanentDeleteByPath is used to delete a file or directory specified by its
 // path, not just putting it in the trash
-func (c *Client) PermanentDeleteByPath(name string) error {
+func (c *FilesClient) PermanentDeleteByPath(name string) error {
 	doc, err := c.GetDirOrFileByPath(name)
 	if err != nil {
 		return err
@@ -386,7 +413,7 @@ func (c *Client) PermanentDeleteByPath(name string) error {
 
 // getIncludedPage performs a GET request on reqPath with reqQuery and returns
 // the page's included DirOrFile items and the next link (empty if none).
-func (c *Client) getIncludedPage(reqPath string, reqQuery url.Values) ([]*DirOrFile, string, error) {
+func (c *FilesClient) getIncludedPage(reqPath string, reqQuery url.Values) ([]*DirOrFile, string, error) {
 	res, err := c.Req(&request.Options{
 		Method:  "GET",
 		Path:    reqPath,
@@ -406,8 +433,8 @@ func (c *Client) getIncludedPage(reqPath string, reqQuery url.Values) ([]*DirOrF
 // ListChildrenByDirID returns all direct child items (files and directories)
 // of the directory identified by its ID. It transparently follows pagination
 // and returns the complete list.
-func (c *Client) ListChildrenByDirID(id string) ([]*DirOrFile, error) {
-	reqPath := "/files/" + url.PathEscape(id)
+func (c *FilesClient) ListChildrenByDirID(id string) ([]*DirOrFile, error) {
+	reqPath := c.filesPath("/" + url.PathEscape(id))
 	reqQuery := url.Values{"page[limit]": {ListChildrenPageSize}}
 	var all []*DirOrFile
 	for {
@@ -434,7 +461,7 @@ type WalkFn func(name string, doc *DirOrFile, err error) error
 
 // WalkByPath is used to walk along the filesystem tree originated at the
 // specified root path.
-func (c *Client) WalkByPath(root string, walkFn WalkFn) error {
+func (c *FilesClient) WalkByPath(root string, walkFn WalkFn) error {
 	doc, err := c.GetDirOrFileByPath(path.Clean(root))
 	root = path.Clean(root)
 	if err != nil {
@@ -443,7 +470,7 @@ func (c *Client) WalkByPath(root string, walkFn WalkFn) error {
 	return walk(c, root, doc, walkFn)
 }
 
-func walk(c *Client, name string, doc *DirOrFile, walkFn WalkFn) error {
+func walk(c *FilesClient, name string, doc *DirOrFile, walkFn WalkFn) error {
 	isDir := doc.Attrs.Type == DirType
 
 	err := walkFn(name, doc, nil)
@@ -458,7 +485,7 @@ func walk(c *Client, name string, doc *DirOrFile, walkFn WalkFn) error {
 		return nil
 	}
 
-	reqPath := "/files/" + url.PathEscape(doc.ID)
+	reqPath := c.filesPath("/" + url.PathEscape(doc.ID))
 	reqQuery := url.Values{"page[limit]": {ListChildrenPageSize}}
 	for {
 		included, next, err := c.getIncludedPage(reqPath, reqQuery)
